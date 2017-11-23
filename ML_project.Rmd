@@ -1,0 +1,147 @@
+---
+title: "Machine Learning Project"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, the  goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants in order to predict the manner in which they did the following exercise: they were asked to perform barbell lifts correctly and incorrectly in 5 different ways:
+
+* exactly according to the specification (Class A), 
+* throwing the elbows to the front (Class B), 
+* lifting the dumbbell only halfway (Class C), 
+* lowering the dumbbell only halfway (Class D) 
+* and throwing the hips to the front (Class E).
+
+
+
+## Model Design
+
+The steps to complete the project are:
+
+* Load the data and perform exploratory analysis of the data to select which variables are relevant for the prediction model.
+* Split the data into different subsets for training and testing the model.
+* Estimate the parameters of the model with the training dataset.
+* Estimate the out of the sample error: apply the model to calculate the predicted outcomes for the testing dataset and
+  compare these predicted values to the actual values of the dataset. This way the accuracy is estimated and so the error.
+* Forecast the output for the additional data that is provided, as required in the project description.
+
+
+### Exploratory data analysis and selection of explanatory variables
+
+
+```{r setup2, message=FALSE}
+library(caret)
+library(rpart)    #Tree model
+library(rattle)   #for drawing tree model
+library(randomForest) #randomForest model
+
+#for reproducibility
+set.seed(284)
+```
+
+The data is read and the columns (variables) which are clearly not explanatory (timestamps, ids) are removed.
+Also the variables whose values are not available for most of the observations.
+Finally, we check whether there're variables with zero or near-zero variance in order to removed them.
+
+```{r clean}
+
+# the datasets have been downloaded previously and are available at the current working directory.
+# from a visual inspection of the .csv files, there're many empty values , NA, and DIV/0. 
+# we turn this data to "NA"
+alldata = read.csv("pml-training.csv",na.strings=c("NA","#DIV/0!",""))
+names(alldata)
+
+#remove columns that cannot be predictors (first 7 columns): "X","user_name","raw_timestamp_part_1","raw_timestamp_part_2"    
+#"cvtd_timestamp","new_window","num_window" 
+reduceddata <- alldata[, -c(1:7)]
+
+#remove columns which a high number of #NA  values (>70%)
+rate <- apply(reduceddata, 2, function(x) (sum(is.na(x))))/nrow(reduceddata)
+reduceddata <- reduceddata[!(rate>0.7)]
+length(reduceddata)
+
+
+#check  if in there're  NearZeroVariance variables:
+NZVdata <- nearZeroVar(reduceddata, saveMetrics=TRUE)  
+sum(NZVdata$zeroVar == TRUE)
+sum(NZVdata$nzv == TRUE)
+
+```
+It seems there're no near-zero variance variables, so we will use the  variables selected after removing NAs as predictors.
+
+```{r outputvariable}
+plot(reduceddata$classe, main="distribution of outcome variable-classe")
+```
+
+The  plot shows the distribution of the outcome variable that has to be predicted. Every of the possible outcomes have several '000 samples.
+
+### Model selection
+
+The dataset is splitted intro training and testing subsets.
+
+```{r split}
+
+#let's partition the dataset into training and testing: 70%-30%
+train <- createDataPartition(y=reduceddata$classe,p=.70,list=F)
+training <- reduceddata[train,]
+testing <- reduceddata[-train,]
+
+```
+
+Since we want to predict which of the 5 groups "A"..."E" an observation is assigned to, we start with a **tree model**:
+```{r treemodel}
+modTree <- rpart(classe ~ ., data=training, method = "class")
+fancyRpartPlot(modTree)
+
+#check with test dataset
+testingTree <- predict(modTree, newdata = testing, type = "class")
+
+m1 <- confusionMatrix(testingTree, testing$classe)
+m1
+acc1 <- m1$overall['Accuracy']
+```
+
+The accuracy of the model is `r acc1`.
+
+If we compare to a **Random Forest model** -computationally more demanding but improves accuracy-, we get the following results:
+
+```{r rfmodel}
+modFitRF <- randomForest(classe ~ ., data=training, method="class")
+testingRF <- predict(modFitRF, newdata = testing, type = "class")
+m2 <- confusionMatrix(testingRF, testing$classe)
+m2
+acc2 <- m2$overall['Accuracy']
+```
+
+The accuracy improves to `r acc2`, therefore the out-of-sample error is `r 1-acc2`.
+
+### Predictions
+
+
+
+```{r predictionsdata}
+#read the file with the input data for prediction and apply the same transformations as in the training data
+preddata = read.csv("pml-testing.csv",na.strings=c("NA","#DIV/0!",""))
+
+#remove columns that cannot be predictors (first 7 columns): "X","user_name","raw_timestamp_part_1","raw_timestamp_part_2"    
+#"cvtd_timestamp","new_window","num_window" 
+reduceddata2 <- preddata[, -c(1:7)]
+
+#remove columns which a high number of #NA  values (>70%)
+reduceddata2 <- reduceddata2[!(rate>0.7)]
+
+# use the most accurate model (Random Forest)
+predictions <- predict(modFitRF, newdata = reduceddata2, type = "class")
+predictions
+```
+
